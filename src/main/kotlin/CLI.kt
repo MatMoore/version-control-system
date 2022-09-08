@@ -103,14 +103,14 @@ fun commit(args: Array<String>) {
   }
   val commitHash = generateCommitHash(stagedFiles, message)
 
-  for (stagedFile in stagedFiles) {
-    val origin = File(stagedFile)
-    val destination = File("vcs/commits/${commitHash}/${stagedFile}")
+  for (trackedFile in index.trackedFiles()) {
+    val origin = File(trackedFile)
+    val destination = File("vcs/commits/${commitHash}/${trackedFile}")
     destination.parentFile.mkdirs()
     origin.copyTo(destination)
 
-    val fileHash = generateFileHash(File(stagedFile))
-    index.updateVersion(stagedFile, fileHash)
+    val fileHash = generateFileHash(File(trackedFile))
+    index.updateVersion(trackedFile, fileHash)
   }
 
   index.save()
@@ -127,7 +127,7 @@ fun log(args: Array<String>) {
 
   for (entry in logEntries.dropLast(1)) {
     println("commit ${entry.commitHash}")
-    println("author ${entry.author}")
+    println("Author: ${entry.author}")
     println(entry.message)
     println()
   }
