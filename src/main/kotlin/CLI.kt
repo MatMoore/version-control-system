@@ -49,14 +49,16 @@ fun config(args: Array<String>) {
 }
 
 fun add(args: Array<String>) {
-  val index = loadIndex().toMutableSet()
+  val index = Index.load()
 
   if(args.isEmpty()) {
     if (index.isEmpty()) {
       println("Add a file to the index.")
     } else {
       println("Tracked files:")
-      index.forEach { println(it) }
+      for (trackedFile in index.trackedFiles()) {
+        println(trackedFile)
+      }
     }
   } else {
     args.forEach {
@@ -67,7 +69,7 @@ fun add(args: Array<String>) {
       index.add(it)
       println("The file '$it' is tracked.")
     }
-    saveIndex(index)
+    index.save()
   }
 }
 
@@ -93,7 +95,12 @@ fun commit(args: Array<String>) {
     exitProcess(1)
   }
 
-  val stagedFiles = loadIndex()
+  val index = Index.load()
+  val stagedFiles = index.stagedFiles()
+  if(stagedFiles.isEmpty()) {
+    println("Nothing to commit.")
+    exitProcess(1)
+  }
   val commitHash = generateCommitHash(stagedFiles, message)
 
   for (stagedFile in stagedFiles) {
@@ -101,16 +108,20 @@ fun commit(args: Array<String>) {
     val destination = File("vcs/commits/${commitHash}/${stagedFile}")
     destination.parentFile.mkdirs()
     origin.copyTo(destination)
+
+    val fileHash = generateFileHash(File(stagedFile))
+    index.updateVersion(stagedFile, fileHash)
   }
 
-  saveIndex(setOf())
+  index.save()
   appendToLog(commitHash, message, author)
+  println("Changes are committed.")
 }
 
 fun log(args: Array<String>) {
   val logEntries = loadLog().reversed()
   if (logEntries.isEmpty()) {
-    println("No commits")
+    println("No commits yet.")
     return
   }
 
@@ -123,7 +134,7 @@ fun log(args: Array<String>) {
 
   val last = logEntries.last()
   println("commit ${last.commitHash}")
-  println("author ${last.author}")
+  println("Author: ${last.author}")
   println(last.message)
 }
 
@@ -142,6 +153,13 @@ fun generateCommitHash(filenames: Set<String>, message: String): String {
     sha256.update(filename.toByteArray())
     sha256.update(file.inputStream().readAllBytes())
   }
+
+  return "%032x".format(BigInteger(1, sha256.digest()))
+}
+
+fun generateFileHash(file: File): String {
+  val sha256 = MessageDigest.getInstance("SHA-256")
+  sha256.update(file.inputStream().readAllBytes())
 
   return "%032x".format(BigInteger(1, sha256.digest()))
 }
@@ -196,21 +214,60 @@ fun loadConfig(): Map<String, String>? {
 
 fun getAuthor() : String? = loadConfig()?.get("name")
 
-fun loadIndex(): Set<String> {
-  val indexFile = File("vcs/index.txt")
-  if (!indexFile.exists()) {
-    return setOf()
+/**
+ * The index stores the tracked files.
+ * We also store the hash of the last committed version of the file,
+ * so we can detect when there are changes that can be committed.
+ *
+ * FIXME - this has a weird constructor
+ * FIXME - use File instead of string?
+ */
+class Index(val fileEntries: MutableMap<String, String>) {
+  companion object {
+    fun load(): Index {
+      val indexFile = File("vcs/index.txt")
+      if (!indexFile.exists()) {
+        return Index(mutableMapOf())
+      }
+
+      val indexText = indexFile.readText().trimEnd()
+
+      val fileEntries = indexText.split("\n").associate {
+        val parts = it.split(":")
+        parts.first() to parts.last()
+      }
+
+      return Index(fileEntries.toMutableMap())
+    }
   }
 
-  val lines = indexFile.readText().split("\n").toSet()
+  private fun hasChanged(filename: String, committedHash: String): Boolean {
+    val file = File(filename)
+    val currentHash = generateFileHash(file)
+    return currentHash != committedHash
+  }
 
-  return lines.minusElement("") // splitting an empty string returns a list of empty string >:(
-}
+  fun stagedFiles(): Set<String> = fileEntries.entries.filter { entry -> hasChanged(entry.key, entry.value) }.map { it.key }.toSet()
 
-fun saveIndex(index: Set<String>) {
-  val indexFile = File("vcs/index.txt")
-  val encoded = index.joinToString("\n")
-  indexFile.writeText(encoded)
+  fun add(file: String) {
+    fileEntries[file] = ""
+  }
+
+  fun isEmpty(): Boolean {
+    return fileEntries.isEmpty()
+  }
+
+  fun trackedFiles(): Set<String> = fileEntries.keys.toSet()
+
+  fun updateVersion(file: String, fileHash: String) {
+    fileEntries[file] = fileHash
+  }
+
+  fun save() {
+    val indexFile = File("vcs/index.txt")
+    val encoded = fileEntries.map { fileDetails -> "${fileDetails.key}:${fileDetails.value}"}.joinToString("\n")
+    indexFile.writeText(encoded)
+  }
 }
 
 fun loadName(): String? {
