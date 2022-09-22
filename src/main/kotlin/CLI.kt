@@ -22,6 +22,9 @@ val commands = mapOf(
 
 data class LogEntry(val author: String, val commitHash: String, val message: String)
 
+@JvmInline
+value class CommitHash(private val s: CharSequence)
+
 fun printHelp() {
   println("These are SVCS commands:")
   for((name, desc) in helpMessages.entries) {
@@ -116,6 +119,37 @@ fun commit(args: Array<String>) {
   index.save()
   appendToLog(commitHash, message, author)
   println("Changes are committed.")
+}
+
+fun checkout(args: Array<String>) {
+  if(args.isEmpty()) {
+    println("Commit id was not passed.")
+    exitProcess(1)
+  }
+
+  val head: CommitHash = getHead()
+  val checkoutHashStr = args.first()!!
+  val checkoutHash = runCatching { checkoutHashStr.toCommitHash()}.recover {
+    println("Commit does not exist")
+    exitProcess(1)
+  }
+
+  //val diff: Diff = getDiff(head, checkoutHash)
+  //applyDiff(diff)
+  //setHead(checkoutHash)
+}
+
+// TODO: Validate the commit first
+fun CharSequence.toCommitHash(): CommitHash {
+  return CommitHash(this)
+}
+
+/**
+ * TODO: this should read head from a file
+ */
+fun getHead(): CommitHash {
+  val latestEntryInLog = loadLog().last()
+  return latestEntryInLog.commitHash.toCommitHash()
 }
 
 fun log(args: Array<String>) {
