@@ -21,6 +21,8 @@ val commands = mapOf(
 )
 
 data class LogEntry(val author: String, val commitHash: String, val message: String)
+data class Diff(val fileDiffs: Map<File,CommitHash>)
+
 
 @JvmInline
 value class CommitHash(private val s: CharSequence)
@@ -104,6 +106,9 @@ fun commit(args: Array<String>) {
     println("Nothing to commit.")
     exitProcess(1)
   }
+
+  requireLatestVersion()
+
   val commitHash = generateCommitHash(stagedFiles, message)
 
   for (trackedFile in index.trackedFiles()) {
@@ -118,6 +123,7 @@ fun commit(args: Array<String>) {
 
   index.save()
   appendToLog(commitHash, message, author)
+  saveHead(commitHash.toCommitHash())
   println("Changes are committed.")
 }
 
@@ -132,10 +138,15 @@ fun checkout(args: Array<String>) {
   val checkoutHash = runCatching { checkoutHashStr.toCommitHash()}.recover {
     println("Commit does not exist")
     exitProcess(1)
+  }.getOrThrow()
+
+  val diff = getDiff(head, checkoutHash)
+  if(diff == null) {
+    println("Log file is corrupt T_T")
+    exitProcess(1)
   }
 
-  //val diff: Diff = getDiff(head, checkoutHash)
-  //applyDiff(diff)
+  applyDiff(diff)
   //setHead(checkoutHash)
 }
 
@@ -144,12 +155,87 @@ fun CharSequence.toCommitHash(): CommitHash {
   return CommitHash(this)
 }
 
-/**
- * TODO: this should read head from a file
- */
 fun getHead(): CommitHash {
+  val headFile = File("vcs/head.txt")
+  return CommitHash(headFile.readText())
+}
+
+/**
+ * Generate a diff between two commits. A diff contains the information required
+ * to modify the working tree from one commit to another.
+ *
+ * We construct this by iterating through the log from the `from` commit to the `to` commit,
+ * keeping track of all the files that have changed. Then we return the copy of the file
+ * that is closest to the `to` commit.
+ *
+ * Returns null if the log file is corrupt (i.e. the commit hash does not exist in the log)
+ * Returns an empty diff if the `from` and `to` commit are the same.
+ */
+fun getDiff(from: CommitHash, to: CommitHash): Diff? {
+  if(from == to) {
+    return Diff(mapOf())
+  }
+
+  var log = loadLog()
+  var fromIndex = log.indexOfFirst { it.commitHash.toCommitHash() == from }
+  var toIndex = log.indexOfFirst { it.commitHash.toCommitHash() == from }
+  val fileDiffs: MutableMap<File, CommitHash> = mutableMapOf()
+
+  if(fromIndex == -1 || toIndex == -1) {
+    return null
+  }
+
+  if(fromIndex > toIndex) {
+    log = log.reversed()
+    fromIndex = log.indexOfFirst { it.commitHash.toCommitHash() == from }
+    toIndex = log.indexOfFirst { it.commitHash.toCommitHash() == from }
+  }
+
+  for (entry in log.subList(fromIndex + 1, toIndex + 1)) {
+    val entryHash = entry.commitHash.toCommitHash()
+    val filesChanged = getCommitFiles(entryHash)
+    for (file in filesChanged) {
+      fileDiffs[file] = entryHash
+    }
+  }
+
+  return Diff(fileDiffs)
+}
+
+/**
+ * Apply a diff in order to return the working tree to the state of another commit
+ * This overwrites any uncommited changes in the working tree, but leaves intact
+ * any files that are not included in the diff (i.e. they are the same in both commits).
+ */
+fun applyDiff(diff: Diff) {
+  for((file, commitHash) in diff.fileDiffs.entries) {
+    val sourceFile = File("vcs/commits/${commitHash}/${file}")
+    sourceFile.copyTo(file)
+  }
+}
+
+fun getCommitFiles(commit: CommitHash): List<File> {
+  return listOf()
+}
+
+/**
+ * Check that the head pointer is the latest version in the log.
+ * If not, then we have an older version checked out, and should not
+ * allow further commits.
+ * This is equivalent to a "detached head" in git
+ */
+fun requireLatestVersion() {
   val latestEntryInLog = loadLog().last()
-  return latestEntryInLog.commitHash.toCommitHash()
+  val latestHash = latestEntryInLog.commitHash.toCommitHash()
+  if(latestHash != getHead()) {
+    println("You need to checkout the latest version (${latestHash}) before you can commit new changes")
+    exitProcess(1)
+  }
+}
+
+fun saveHead(head: CommitHash) {
+  val headFile = File("vcs/head.txt")
+  headFile.writeText(head.toString())
 }
 
 fun log(args: Array<String>) {
