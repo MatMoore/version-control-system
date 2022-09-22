@@ -17,15 +17,38 @@ val commands = mapOf(
   "config" to ::config,
   "add" to ::add,
   "commit" to ::commit,
-  "log" to ::log
+  "log" to ::log,
+  "checkout" to ::checkout
 )
 
 data class LogEntry(val author: String, val commitHash: String, val message: String)
 data class Diff(val fileDiffs: Map<File,CommitHash>)
 
+sealed interface CommitRef {
+  companion object {
+    fun fromString(string: String): CommitRef =
+      // TODO: it would be nice to also support relative hashes
+      // e.g. next, prev
+      // if we support branching, could have one for the branch point as well
+      when(string.lowercase()) {
+        "latest" -> {
+          Latest
+        }
+        else -> {
+          // TODO: this could check it looks like a hash first
+          string.toCommitHash()
+        }
+      }
+  }
+}
+object Latest: CommitRef
 
 @JvmInline
-value class CommitHash(private val s: CharSequence)
+value class CommitHash(private val s: CharSequence) : CommitRef, CharSequence by s {
+  override fun toString(): String {
+    return s.toString()
+  }
+}
 
 fun printHelp() {
   println("These are SVCS commands:")
@@ -84,6 +107,7 @@ fun add(args: Array<String>) {
  * copying files to a subfolder
  * Note that this doesn't do any validation of the index
  * and assumes that no paths begin with '../'
+ * FIXME: this needs to handle deletions
  */
 fun commit(args: Array<String>) {
   if(args.isEmpty()) {
@@ -127,6 +151,16 @@ fun commit(args: Array<String>) {
   println("Changes are committed.")
 }
 
+/**
+ * Restore files from an earlier commit.
+ * This command performs the minimal changes to the working tree
+ * to recreate the commit, so if you have uncommited changes to a file,
+ * and you revert to an earlier commit which has the same version of the file as the one you started from,
+ * then your uncommited changes will still be there.
+ * This means that checking out the current ("head") commit is always a no-op.
+ * We currently don't have a command that fully reverts the working tree to the exact state
+ * of a commit, like `git reset --hard` or `git stash`
+ */
 fun checkout(args: Array<String>) {
   if(args.isEmpty()) {
     println("Commit id was not passed.")
@@ -134,30 +168,47 @@ fun checkout(args: Array<String>) {
   }
 
   val head: CommitHash = getHead()
-  val checkoutHashStr = args.first()!!
-  val checkoutHash = runCatching { checkoutHashStr.toCommitHash()}.recover {
-    println("Commit does not exist")
+
+  // TODO tidy this up
+  val commitRef = runCatching { CommitRef.fromString(args.first()) }.recover {
+    println("Commit does not exist.")
     exitProcess(1)
   }.getOrThrow()
 
-  val diff = getDiff(head, checkoutHash)
+  val commitHash = runCatching {  resolveCommitRef(commitRef) }.recover {
+    println("Commit does not exist.")
+    exitProcess(1)
+  }.getOrThrow()
+
+  val diff = getDiff(head, commitHash)
   if(diff == null) {
     println("Log file is corrupt T_T")
     exitProcess(1)
   }
 
   applyDiff(diff)
-  //setHead(checkoutHash)
+  saveHead(commitHash)
+  println("Switched to commit $commitHash.")
 }
 
-// TODO: Validate the commit first
+fun resolveCommitRef(commitRef: CommitRef): CommitHash =
+  when(commitRef) {
+    Latest -> {
+      latestCommitHash() ?: throw IllegalArgumentException("the log is empty, so there is no latest commit")
+    }
+    is CommitHash -> commitRef
+  }
+
 fun CharSequence.toCommitHash(): CommitHash {
+  if(!(loadLog().any { it.commitHash == this })) {
+    throw Exception("Commit does not exist")
+  }
   return CommitHash(this)
 }
 
 fun getHead(): CommitHash {
   val headFile = File("vcs/head.txt")
-  return CommitHash(headFile.readText())
+  return CommitHash(headFile.readText().trim())
 }
 
 /**
@@ -178,7 +229,7 @@ fun getDiff(from: CommitHash, to: CommitHash): Diff? {
 
   var log = loadLog()
   var fromIndex = log.indexOfFirst { it.commitHash.toCommitHash() == from }
-  var toIndex = log.indexOfFirst { it.commitHash.toCommitHash() == from }
+  var toIndex = log.indexOfFirst { it.commitHash.toCommitHash() == to }
   val fileDiffs: MutableMap<File, CommitHash> = mutableMapOf()
 
   if(fromIndex == -1 || toIndex == -1) {
@@ -188,12 +239,13 @@ fun getDiff(from: CommitHash, to: CommitHash): Diff? {
   if(fromIndex > toIndex) {
     log = log.reversed()
     fromIndex = log.indexOfFirst { it.commitHash.toCommitHash() == from }
-    toIndex = log.indexOfFirst { it.commitHash.toCommitHash() == from }
+    toIndex = log.indexOfFirst { it.commitHash.toCommitHash() == to }
   }
 
   for (entry in log.subList(fromIndex + 1, toIndex + 1)) {
     val entryHash = entry.commitHash.toCommitHash()
     val filesChanged = getCommitFiles(entryHash)
+
     for (file in filesChanged) {
       fileDiffs[file] = entryHash
     }
@@ -209,13 +261,15 @@ fun getDiff(from: CommitHash, to: CommitHash): Diff? {
  */
 fun applyDiff(diff: Diff) {
   for((file, commitHash) in diff.fileDiffs.entries) {
-    val sourceFile = File("vcs/commits/${commitHash}/${file}")
-    sourceFile.copyTo(file)
+    val commitPath = File("vcs/commits/${commitHash}")
+    val sourceFile = commitPath.resolve(file)
+    sourceFile.copyTo(file, overwrite = true)
   }
 }
 
 fun getCommitFiles(commit: CommitHash): List<File> {
-  return listOf()
+  val commitPath = File("vcs/commits/${commit}")
+  return File("vcs/commits/${commit}").walkTopDown().filter(File::isFile).map { it.relativeTo(commitPath) }.toList()
 }
 
 /**
@@ -225,12 +279,20 @@ fun getCommitFiles(commit: CommitHash): List<File> {
  * This is equivalent to a "detached head" in git
  */
 fun requireLatestVersion() {
-  val latestEntryInLog = loadLog().last()
-  val latestHash = latestEntryInLog.commitHash.toCommitHash()
-  if(latestHash != getHead()) {
+  val latestHash = latestCommitHash()
+  if(latestHash != null && latestHash != getHead()) {
     println("You need to checkout the latest version (${latestHash}) before you can commit new changes")
     exitProcess(1)
   }
+}
+
+fun latestCommitHash(): CommitHash? {
+  val log = loadLog()
+  if(log.isEmpty()) {
+    return null
+  }
+  val latestEntryInLog = loadLog().last()
+  return latestEntryInLog.commitHash.toCommitHash()
 }
 
 fun saveHead(head: CommitHash) {
@@ -238,6 +300,9 @@ fun saveHead(head: CommitHash) {
   headFile.writeText(head.toString())
 }
 
+/**
+ * TODO: this should integrate with a pager
+ */
 fun log(args: Array<String>) {
   val logEntries = loadLog().reversed()
   if (logEntries.isEmpty()) {
