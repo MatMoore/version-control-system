@@ -57,10 +57,6 @@ fun printHelp() {
   }
 }
 
-fun printCommandHelp(name: String) {
-  println("%-11s %s".format(name, helpMessages[name]!!))
-}
-
 fun config(args: Array<String>): Int {
   if(args.isEmpty()) {
     val name = loadName()
@@ -153,6 +149,31 @@ fun commit(args: Array<String>): Int {
   appendToLog(commitHash, message, author)
   saveHead(commitHash.toCommitHash())
   println("Changes are committed.")
+  return 0
+}
+
+
+/**
+ * TODO: this should integrate with a pager
+ */
+fun log(args: Array<String>): Int {
+  val logEntries = loadLog().reversed()
+  if (logEntries.isEmpty()) {
+    println("No commits yet.")
+    return 0
+  }
+
+  for (entry in logEntries.dropLast(1)) {
+    println("commit ${entry.commitHash}")
+    println("Author: ${entry.author}")
+    println(entry.message)
+    println()
+  }
+
+  val last = logEntries.last()
+  println("commit ${last.commitHash}")
+  println("Author: ${last.author}")
+  println(last.message)
   return 0
 }
 
@@ -304,30 +325,6 @@ fun latestCommitHash(): CommitHash? {
 fun saveHead(head: CommitHash) {
   val headFile = File("vcs/head.txt")
   headFile.writeText(head.toString())
-}
-
-/**
- * TODO: this should integrate with a pager
- */
-fun log(args: Array<String>): Int {
-  val logEntries = loadLog().reversed()
-  if (logEntries.isEmpty()) {
-    println("No commits yet.")
-    return 0
-  }
-
-  for (entry in logEntries.dropLast(1)) {
-    println("commit ${entry.commitHash}")
-    println("Author: ${entry.author}")
-    println(entry.message)
-    println()
-  }
-
-  val last = logEntries.last()
-  println("commit ${last.commitHash}")
-  println("Author: ${last.author}")
-  println(last.message)
-  return 0
 }
 
 /**

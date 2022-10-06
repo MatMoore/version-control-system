@@ -104,6 +104,42 @@ private class CLITest {
     }
   }
 
+  @Nested
+  inner class LogTest {
+    @Test
+    fun `when the log is empty`() {
+      val output = tapSystemOut { log(arrayOf()) }
+      assertThat(output).isEqualTo("No commits yet.\n")
+    }
+
+    @Test
+    fun `when there is a single log entry`() {
+      val file = createTestFile(File("foo"), "abc".toByteArray())
+      config(arrayOf("Mat"))
+      add(arrayOf(file.toString()))
+      commit(arrayOf("first commit"))
+
+      val output = tapSystemOut { log(arrayOf()) }
+
+      assertThat(output).matches("""^commit [0-9a-f]+\nAuthor: Mat\nfirst commit\n$""")
+    }
+
+    @Test
+    fun `when there are multiple log entries`() {
+      val file1 = createTestFile(File("foo"), "abc".toByteArray())
+      val file2 = createTestFile(File("foo"), "abc".toByteArray())
+      config(arrayOf("Mat"))
+      add(arrayOf(file1.toString()))
+      commit(arrayOf("first commit"))
+      add(arrayOf(file2.toString()))
+      commit(arrayOf("second commit"))
+
+      val output = tapSystemOut { log(arrayOf()) }
+
+      assertThat(output).matches("""^commit [0-9a-f]+\nAuthor: Mat\nsecond commit\n\ncommit [0-9a-f]+\nAuthor: Mat\nfirst commit\n$""")
+    }
+  }
+
   private fun createTestFile(relativePath: File, contents: ByteArray): File =
     File("testFiles").resolve(relativePath).also {
       it.writeBytes(contents)
