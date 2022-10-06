@@ -77,3 +77,4 @@ kotlin-ide/
 vcs/
  .idea/jpa-buddy.xml
 example/
+testFiles/

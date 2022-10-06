@@ -124,7 +124,7 @@ fun commit(args: Array<String>): Int {
 
   if(author == null) {
     println("Please configure your name first.")
-    printCommandHelp("config")
+    println("vcs config <name>")
     return 1
   }
 

@@ -1,11 +1,10 @@
 package svcs
 
 import com.github.stefanbirkner.systemlambda.SystemLambda.tapSystemOut
-import org.junit.jupiter.api.BeforeAll
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
-import org.assertj.core.api.Assertions.*
-import org.junit.jupiter.api.BeforeEach
 import java.io.File
 
 private class CLITest {
@@ -73,6 +72,37 @@ private class CLITest {
     }
   }
 
+  @Nested
+  inner class CommitTest {
+    @Test
+    fun `when no message is given, show an error`() {
+      val output = tapSystemOut { commit(arrayOf()) }
+      assertThat(output).isEqualTo("Message was not passed.\n")
+    }
+
+    @Test
+    fun `when username is not configured, show an error`() {
+      val output = tapSystemOut { commit(arrayOf("FIX")) }
+      assertThat(output).isEqualTo("Please configure your name first.\nvcs config <name>\n")
+    }
+
+    @Test
+    fun `when there is nothing to commit, show an error`() {
+      config(arrayOf("Mat"))
+      val output = tapSystemOut { commit(arrayOf("FIX")) }
+      assertThat(output).isEqualTo("Nothing to commit.\n")
+    }
+
+    @Test
+    fun `when there are staged files, show that the commit was successful`() {
+      config(arrayOf("Mat"))
+      val file = createTestFile(File("foo"), "abc".toByteArray())
+      add(arrayOf(file.toString()))
+
+      val output = tapSystemOut { commit(arrayOf("FIX")) }
+      assertThat(output).isEqualTo("Changes are committed.\n")
+    }
+  }
 
   private fun createTestFile(relativePath: File, contents: ByteArray): File =
     File("testFiles").resolve(relativePath).also {
