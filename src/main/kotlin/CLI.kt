@@ -61,7 +61,7 @@ fun printCommandHelp(name: String) {
   println("%-11s %s".format(name, helpMessages[name]!!))
 }
 
-fun config(args: Array<String>) {
+fun config(args: Array<String>): Int {
   if(args.isEmpty()) {
     val name = loadName()
     if (name === null) {
@@ -74,9 +74,11 @@ fun config(args: Array<String>) {
     storeConfig(mapOf("name" to name))
     println("The username is $name.")
   }
+
+  return 0
 }
 
-fun add(args: Array<String>) {
+fun add(args: Array<String>): Int {
   val index = Index.load()
 
   if(args.isEmpty()) {
@@ -92,13 +94,15 @@ fun add(args: Array<String>) {
     args.forEach {
       if(!File(it).exists()) {
         println("Can't find '$it'.")
-        exitProcess(1)
+        return 1
       }
       index.add(it)
       println("The file '$it' is tracked.")
     }
     index.save()
   }
+
+  return 0
 }
 
 
@@ -109,7 +113,7 @@ fun add(args: Array<String>) {
  * and assumes that no paths begin with '../'
  * FIXME: this needs to handle deletions
  */
-fun commit(args: Array<String>) {
+fun commit(args: Array<String>): Int {
   if(args.isEmpty()) {
     println("Message was not passed.")
     exitProcess(1)
@@ -121,14 +125,14 @@ fun commit(args: Array<String>) {
   if(author == null) {
     println("Please configure your name first.")
     printCommandHelp("config")
-    exitProcess(1)
+    return 1
   }
 
   val index = Index.load()
   val stagedFiles = index.stagedFiles()
   if(stagedFiles.isEmpty()) {
     println("Nothing to commit.")
-    exitProcess(1)
+    return 1
   }
 
   requireLatestVersion()
@@ -149,6 +153,7 @@ fun commit(args: Array<String>) {
   appendToLog(commitHash, message, author)
   saveHead(commitHash.toCommitHash())
   println("Changes are committed.")
+  return 0
 }
 
 /**
@@ -161,10 +166,10 @@ fun commit(args: Array<String>) {
  * We currently don't have a command that fully reverts the working tree to the exact state
  * of a commit, like `git reset --hard` or `git stash`
  */
-fun checkout(args: Array<String>) {
+fun checkout(args: Array<String>): Int {
   if(args.isEmpty()) {
     println("Commit id was not passed.")
-    exitProcess(1)
+    return 1
   }
 
   val head: CommitHash = getHead()
@@ -172,23 +177,24 @@ fun checkout(args: Array<String>) {
   // TODO tidy this up
   val commitRef = runCatching { CommitRef.fromString(args.first()) }.recover {
     println("Commit does not exist.")
-    exitProcess(1)
+    return 1
   }.getOrThrow()
 
   val commitHash = runCatching {  resolveCommitRef(commitRef) }.recover {
     println("Commit does not exist.")
-    exitProcess(1)
+    return 1
   }.getOrThrow()
 
   val diff = getDiff(head, commitHash)
   if(diff == null) {
     println("Log file is corrupt T_T")
-    exitProcess(1)
+    return 1
   }
 
   applyDiff(diff)
   saveHead(commitHash)
   println("Switched to commit $commitHash.")
+  return 0
 }
 
 fun resolveCommitRef(commitRef: CommitRef): CommitHash =
@@ -303,11 +309,11 @@ fun saveHead(head: CommitHash) {
 /**
  * TODO: this should integrate with a pager
  */
-fun log(args: Array<String>) {
+fun log(args: Array<String>): Int {
   val logEntries = loadLog().reversed()
   if (logEntries.isEmpty()) {
     println("No commits yet.")
-    return
+    return 0
   }
 
   for (entry in logEntries.dropLast(1)) {
@@ -321,6 +327,7 @@ fun log(args: Array<String>) {
   println("commit ${last.commitHash}")
   println("Author: ${last.author}")
   println(last.message)
+  return 0
 }
 
 /**
@@ -442,7 +449,7 @@ class Index(val fileEntries: MutableMap<String, String>) {
     return fileEntries.isEmpty()
   }
 
-  fun trackedFiles(): Set<String> = fileEntries.keys.toSet()
+  fun trackedFiles(): List<String> = fileEntries.keys.sorted()
 
   fun updateVersion(file: String, fileHash: String) {
     fileEntries[file] = fileHash
@@ -478,7 +485,8 @@ fun main(args: Array<String>) {
     }
 
     in commands -> {
-      commands[command]?.invoke(args.drop(1).toTypedArray())
+      val exitCode = commands[command]?.invoke(args.drop(1).toTypedArray()) ?: 0
+      exitProcess(exitCode)
     }
 
     in helpMessages -> {

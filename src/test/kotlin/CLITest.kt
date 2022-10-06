@@ -40,8 +40,42 @@ private class CLITest {
     }
   }
 
-  private fun createTestFile(relativePath: File, contents: ByteArray) {
-    File("testFiles").resolve(relativePath).writeBytes(contents)
+  @Nested
+  inner class AddTest {
+    @Test
+    fun `when the index is empty, prompt to add files`() {
+      val output = tapSystemOut { add(arrayOf()) }
+      assertThat(output).isEqualTo("Add a file to the index.\n")
+    }
+
+    @Test
+    fun `when adding a file, show that the file is tracked`() {
+      val file = createTestFile(File("foo"), "abc".toByteArray())
+      val output = tapSystemOut { add(arrayOf(file.toString())) }
+      assertThat(output).isEqualTo("The file '${file}' is tracked.\n")
+    }
+
+    @Test
+    fun `when a file doesn't exist, show an error`() {
+      val output = tapSystemOut { add(arrayOf("testFiles/foo")) }
+      assertThat(output).isEqualTo("Can't find 'testFiles/foo'.\n")
+    }
+
+    @Test
+    fun `when files are tracked, list the tracked files`() {
+      val file1 = createTestFile(File("foo"), "abc".toByteArray())
+      val file2 = createTestFile(File("bar"), "abc".toByteArray())
+      add(arrayOf(file1.toString()))
+      add(arrayOf(file2.toString()))
+
+      val output = tapSystemOut { add(arrayOf()) }
+      assertThat(output).isEqualTo("Tracked files:\n${file2}\n${file1}\n")
+    }
   }
 
+
+  private fun createTestFile(relativePath: File, contents: ByteArray): File =
+    File("testFiles").resolve(relativePath).also {
+      it.writeBytes(contents)
+    }
 }
