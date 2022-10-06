@@ -14,6 +14,9 @@ repositories {
 
 dependencies {
     testImplementation(kotlin("test"))
+    // https://mvnrepository.com/artifact/org.assertj/assertj-core
+    testImplementation("org.assertj:assertj-core:3.23.1")
+    testImplementation("com.github.stefanbirkner:system-lambda:1.2.1")
 }
 
 application {
