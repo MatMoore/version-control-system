@@ -112,7 +112,7 @@ fun add(args: Array<String>): Int {
 fun commit(args: Array<String>): Int {
   if(args.isEmpty()) {
     println("Message was not passed.")
-    exitProcess(1)
+    return 1
   }
 
   val message = args.first()

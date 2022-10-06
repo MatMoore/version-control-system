@@ -3,6 +3,7 @@ package svcs
 import com.github.stefanbirkner.systemlambda.SystemLambda.tapSystemOut
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -121,7 +122,7 @@ private class CLITest {
 
       val output = tapSystemOut { log(arrayOf()) }
 
-      assertThat(output).matches("""^commit [0-9a-f]+\nAuthor: Mat\nfirst commit\n$""")
+      assertThat(output).matches("""^commit [\da-f]+\nAuthor: Mat\nfirst commit\n$""")
     }
 
     @Test
@@ -136,7 +137,63 @@ private class CLITest {
 
       val output = tapSystemOut { log(arrayOf()) }
 
-      assertThat(output).matches("""^commit [0-9a-f]+\nAuthor: Mat\nsecond commit\n\ncommit [0-9a-f]+\nAuthor: Mat\nfirst commit\n$""")
+      assertThat(output).matches("""^commit [\da-f]+\nAuthor: Mat\nsecond commit\n\ncommit [\da-f]+\nAuthor: Mat\nfirst commit\n$""")
+    }
+  }
+
+  @Nested
+  inner class CheckoutTest {
+    @Test
+    fun `when a commit reference is not passed, show an error`() {
+      val output = tapSystemOut { checkout(arrayOf()) }
+      assertThat(output).isEqualTo("Commit id was not passed.\n")
+    }
+
+    @Test
+    fun `when a commit reference is invalid, show an error`() {
+      val file1 = createTestFile(File("foo"), "abc".toByteArray())
+      val file2 = createTestFile(File("foo"), "abc".toByteArray())
+      config(arrayOf("Mat"))
+      add(arrayOf(file1.toString()))
+      commit(arrayOf("first commit"))
+      add(arrayOf(file2.toString()))
+      commit(arrayOf("second commit"))
+
+      val output = tapSystemOut { checkout(arrayOf("abc")) }
+
+      assertThat(output).isEqualTo("Commit does not exist.\n")
+    }
+
+    @Test
+    fun `when reverting to an earlier commit, changed files should be overridden with the earlier version`() {
+      val file1 = createTestFile(File("foo"), "abc".toByteArray())
+      config(arrayOf("Mat"))
+      add(arrayOf(file1.toString()))
+      commit(arrayOf("first commit"))
+      createTestFile(File("foo"), "def".toByteArray())
+      commit(arrayOf("second commit"))
+      val logOutput = tapSystemOut { log(arrayOf()) }
+      val commitRef = """commit ([\da-f]+)""".toRegex().findAll(logOutput).last().groupValues[1]
+
+      val output = tapSystemOut { checkout(arrayOf(commitRef)) }
+
+      assertThat(output).isEqualTo("Switched to commit ${commitRef}.\n")
+      assertThat(file1.readText()).isEqualTo("abc")
+    }
+
+    @Disabled
+    @Test
+    fun `when reverting to an earlier commit, subsequently added files should be removed`() {}
+
+    @Disabled
+    @Test
+    fun `when reverting to an earlier commit, subsequently removed files should be added`() {}
+
+    @Disabled
+    @Test
+    fun `when there is no commit, show an error`() {
+      val output = tapSystemOut { checkout(arrayOf("latest")) }
+      assertThat(output).isEqualTo("Commit does not exist.\n")
     }
   }
 
